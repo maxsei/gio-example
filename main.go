@@ -184,9 +184,6 @@ func CreateEggWidget(constraints *layout.Constraints) layout.Widget {
 		}
 		gtx.Constraints = *constraints
 
-		// Start at this point.
-		// op.Offset(f32.Pt(x, y)).Add(gtx.Ops)
-
 		center := gtx.Constraints.Max.Div(2)
 		centerF32 := f32.Pt(float32(center.X), float32(center.Y))
 		op.Offset(centerF32).Add(gtx.Ops)
