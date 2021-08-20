@@ -60,21 +60,29 @@ func draw(w *app.Window) error {
 				Axis:    layout.Vertical,
 				Spacing: layout.SpaceStart,
 			}.Layout(gtx,
-				// Define the children of the flex layout which in this case is just
-				// button widget. Widget's are just functions of a graphical context
-				// that return their dimensions.
+				// Fill flex layout.
 				layout.Rigid(
 					func(gtx layout.Context) layout.Dimensions {
-						// Style the button according to the theme to get a styled button back.
-						btn := material.Button(theme, &startButton, "Start")
 
-						// Add operations to the graphical context to draw the button.
-						return btn.Layout(gtx)
+						// Create a margin inside the flex layout.
+						margin := layout.Inset{
+							Top:    unit.Dp(25),
+							Bottom: unit.Dp(25),
+							Right:  unit.Dp(35),
+							Left:   unit.Dp(35),
+						}
+
+						// Add button to the flex layout.
+						return margin.Layout(gtx,
+							func(gtx layout.Context) layout.Dimensions {
+								// Style the button according to the theme to get a styled button back.
+								btn := material.Button(theme, &startButton, "Start")
+
+								// Add operations to the graphical context to draw the button.
+								return btn.Layout(gtx)
+							},
+						)
 					},
-				),
-				// Add an empty space the bottom of the screen.
-				layout.Rigid(
-					layout.Spacer{Height: unit.Dp(25)}.Layout,
 				),
 			)
 
