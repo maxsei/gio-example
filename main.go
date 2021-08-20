@@ -1,15 +1,20 @@
 package main
 
 import (
+	"image"
+	"image/color"
 	"log"
 	"os"
 	"time"
 
 	"gioui.org/app"
+	"gioui.org/f32"
 	"gioui.org/font/gofont"
 	"gioui.org/io/system"
 	"gioui.org/layout"
 	"gioui.org/op"
+	"gioui.org/op/clip"
+	"gioui.org/op/paint"
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
@@ -65,7 +70,6 @@ func draw(w *app.Window) error {
 		case e := <-w.Events():
 			// Frame event.
 			if fe, ok := e.(system.FrameEvent); ok {
-
 				// Handle start button clicks here.
 				if startButton.Clicked() {
 					if !boiling {
@@ -76,54 +80,79 @@ func draw(w *app.Window) error {
 					boiling = !boiling
 				}
 
+				// Define flex layout with the following options.
+				flex := layout.Flex{
+					Axis:    layout.Vertical,
+					Spacing: layout.SpaceStart,
+				}
+
+				progressBar := func(gtx layout.Context) layout.Dimensions {
+					// Get a progress bar from the theme.
+					bar := material.ProgressBar(theme, progress)
+					// Return layout of bar after drawing.
+					return bar.Layout(gtx)
+				}
+
+				startButtonStyled := func(gtx layout.Context) layout.Dimensions {
+					// Create a margin inside the flex layout.
+					margin := layout.Inset{
+						Top:    unit.Dp(25),
+						Bottom: unit.Dp(25),
+						Right:  unit.Dp(35),
+						Left:   unit.Dp(35),
+					}
+
+					// Add button to the flex layout.
+					return margin.Layout(gtx,
+						func(gtx layout.Context) layout.Dimensions {
+							// Default state is to start boil else try to stop the boiling.
+							btnState := "Start"
+							if boiling {
+								btnState = "Stop"
+							}
+
+							// Style the button according to the theme to get a styled button back.
+							btn := material.Button(theme, &startButton, btnState)
+
+							// Add operations to the graphical context to draw the button.
+							return btn.Layout(gtx)
+						},
+					)
+				}
+
+				// Reverse rendering order to figure out the size of the egg widget.
+				var eggWidget layout.Widget
+				{
+					var ops op.Ops
+					gtx := layout.NewContext(&ops, fe)
+					flex.Layout(gtx,
+						// Add a ProgressBar.
+						layout.Rigid(progressBar),
+						// Add a button with margins.
+						layout.Rigid(startButtonStyled),
+						// Add an egg.
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							// Get the size of the egg widget and create the egg widget.
+							eggDims := CreateEggWidget(nil)(gtx)
+							eggWidget = CreateEggWidget(&layout.Constraints{
+								Max: eggDims.Size,
+							})
+							return eggDims
+						}),
+					)
+				}
+
 				// Create graphical context that contains all the UI operations and the
 				// frame event that triggered them.
 				gtx := layout.NewContext(&ops, fe)
 
-				// Define flex layout with the following options.
-				layout.Flex{
-					Axis:    layout.Vertical,
-					Spacing: layout.SpaceStart,
-				}.Layout(gtx,
+				flex.Layout(gtx,
+					// Add an egg.
+					layout.Rigid(eggWidget),
 					// Add a ProgressBar.
-					layout.Rigid(
-						func(gtx layout.Context) layout.Dimensions {
-							// Get a progress bar from the theme.
-							bar := material.ProgressBar(theme, progress)
-							// Return layout of bar after drawing.
-							return bar.Layout(gtx)
-						},
-					),
+					layout.Rigid(progressBar),
 					// Add a button with margins.
-					layout.Rigid(
-						func(gtx layout.Context) layout.Dimensions {
-
-							// Create a margin inside the flex layout.
-							margin := layout.Inset{
-								Top:    unit.Dp(25),
-								Bottom: unit.Dp(25),
-								Right:  unit.Dp(35),
-								Left:   unit.Dp(35),
-							}
-
-							// Add button to the flex layout.
-							return margin.Layout(gtx,
-								func(gtx layout.Context) layout.Dimensions {
-									// Default state is to start boil else try to stop the boiling.
-									btnState := "Start"
-									if boiling {
-										btnState = "Stop"
-									}
-
-									// Style the button according to the theme to get a styled button back.
-									btn := material.Button(theme, &startButton, btnState)
-
-									// Add operations to the graphical context to draw the button.
-									return btn.Layout(gtx)
-								},
-							)
-						},
-					),
+					layout.Rigid(startButtonStyled),
 				)
 
 				// Add the list of operations to the frame event.
@@ -141,4 +170,34 @@ func draw(w *app.Window) error {
 			w.Invalidate()
 		}
 	}
+}
+
+func CreateEggWidget(constraints *layout.Constraints) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		// Set the constraints to the graphical context constrains if nil.
+		if constraints == nil {
+			constraints = &gtx.Constraints
+		}
+
+		// Figure out how to calculate.
+		r := float32(constraints.Max.Y / 2)
+		// r := float32((gtx.Constraints.Max.Y - 80) / 2)
+		circle := clip.Circle{
+			// Center: f32.Point{X: 100, Y: 0},
+			Center: f32.Point{X: 2 * r, Y: r},
+			Radius: r,
+		}
+
+		circleColor := color.NRGBA{R: 255, A: 255}
+
+		// Paint the circle red with the current graphical context.
+		paint.FillShape(gtx.Ops, circleColor, circle.Op(gtx.Ops))
+
+		// Circle
+		dims := image.Point{Y: int(2 * r)}
+		dims.X = dims.Y
+
+		return layout.Dimensions{Size: dims}
+	}
+
 }
