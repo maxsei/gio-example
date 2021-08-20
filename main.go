@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"time"
 
 	"gioui.org/app"
 	"gioui.org/font/gofont"
@@ -42,60 +43,102 @@ func draw(w *app.Window) error {
 	// Variable that stores UI operations
 	var ops op.Ops
 
+	// Variables for incrementing progress bar.
+	var boiling bool
+	var progress float32
+
+	// Create ticker for boiler that is created stopped.
+	const boilDuration time.Duration = time.Second * 5
+	const boilTickerDuration time.Duration = time.Second / 25
+	boilTicker := time.NewTicker(boilTickerDuration)
+	boilTicker.Stop()
+
+	// If we click the start button we toggle boiling the egg.
 	var startButton widget.Clickable
 
 	// Use the builting material UI theme.
 	theme := material.NewTheme(gofont.Collection())
 
 	// listen for events in the window.
-	for e := range w.Events() {
-		// Frame event.
-		if fe, ok := e.(system.FrameEvent); ok {
-			// Create graphical context that contains all the UI operations and the
-			// frame event that triggered them.
-			gtx := layout.NewContext(&ops, fe)
+	for {
+		select {
+		case e := <-w.Events():
+			// Frame event.
+			if fe, ok := e.(system.FrameEvent); ok {
 
-			// Define flex layout with the following options.
-			layout.Flex{
-				Axis:    layout.Vertical,
-				Spacing: layout.SpaceStart,
-			}.Layout(gtx,
-				// Fill flex layout.
-				layout.Rigid(
-					func(gtx layout.Context) layout.Dimensions {
+				// Handle start button clicks here.
+				if startButton.Clicked() {
+					if !boiling {
+						boilTicker.Reset(boilTickerDuration)
+					} else {
+						boilTicker.Stop()
+					}
+					boiling = !boiling
+				}
 
-						// Create a margin inside the flex layout.
-						margin := layout.Inset{
-							Top:    unit.Dp(25),
-							Bottom: unit.Dp(25),
-							Right:  unit.Dp(35),
-							Left:   unit.Dp(35),
-						}
+				// Create graphical context that contains all the UI operations and the
+				// frame event that triggered them.
+				gtx := layout.NewContext(&ops, fe)
 
-						// Add button to the flex layout.
-						return margin.Layout(gtx,
-							func(gtx layout.Context) layout.Dimensions {
-								// Style the button according to the theme to get a styled button back.
-								btn := material.Button(theme, &startButton, "Start")
+				// Define flex layout with the following options.
+				layout.Flex{
+					Axis:    layout.Vertical,
+					Spacing: layout.SpaceStart,
+				}.Layout(gtx,
+					// Add a ProgressBar.
+					layout.Rigid(
+						func(gtx layout.Context) layout.Dimensions {
+							// Get a progress bar from the theme.
+							bar := material.ProgressBar(theme, progress)
+							// Return layout of bar after drawing.
+							return bar.Layout(gtx)
+						},
+					),
+					// Add a button with margins.
+					layout.Rigid(
+						func(gtx layout.Context) layout.Dimensions {
 
-								// Add operations to the graphical context to draw the button.
-								return btn.Layout(gtx)
-							},
-						)
-					},
-				),
-			)
+							// Create a margin inside the flex layout.
+							margin := layout.Inset{
+								Top:    unit.Dp(25),
+								Bottom: unit.Dp(25),
+								Right:  unit.Dp(35),
+								Left:   unit.Dp(35),
+							}
 
-			// Add the list of operations to the frame event.
-			fe.Frame(gtx.Ops)
-		}
+							// Add button to the flex layout.
+							return margin.Layout(gtx,
+								func(gtx layout.Context) layout.Dimensions {
+									// Default state is to start boil else try to stop the boiling.
+									btnState := "Start"
+									if boiling {
+										btnState = "Stop"
+									}
 
-		// Window is destroyed.
-		if de, ok := e.(system.DestroyEvent); ok {
-			return de.Err
+									// Style the button according to the theme to get a styled button back.
+									btn := material.Button(theme, &startButton, btnState)
+
+									// Add operations to the graphical context to draw the button.
+									return btn.Layout(gtx)
+								},
+							)
+						},
+					),
+				)
+
+				// Add the list of operations to the frame event.
+				fe.Frame(gtx.Ops)
+			}
+
+			// Window is destroyed.
+			if de, ok := e.(system.DestroyEvent); ok {
+				return de.Err
+			}
+
+		case <-boilTicker.C:
+			// Increment progress by the total boil time divided by the tick duration.
+			progress += (float32(boilTickerDuration) / float32(boilDuration))
+			w.Invalidate()
 		}
 	}
-
-	// This code shouln't be reached.
-	panic("not reachable")
 }
