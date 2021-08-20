@@ -181,11 +181,19 @@ func CreateEggWidget(constraints layout.Constraints) layout.Widget {
 		op.Offset(centerF32).Add(gtx.Ops)
 
 		// Calculate the center and the radius of the circle.
-		a := float64(center.Y)
+		r := float64(center.Y)
 		if center.X < center.Y {
-			a = float64(center.X)
+			r = float64(center.X)
 		}
-		a /= (17.0 / 11.0)
+
+		// Constants that relate a to the other variables
+		const (
+			bDivA = (15.0 / 11.0)
+			dDivA = (2.0 / 11.0)
+		)
+
+		// 'a' radius is related in this way to the radius of the circle.
+		a := r / (bDivA + dDivA)
 
 		// Draw egg path.
 		var eggPath clip.Path
@@ -195,10 +203,10 @@ func CreateEggWidget(constraints layout.Constraints) layout.Widget {
 			eggPath.Begin(gtx.Ops)
 			defer eggPath.Close()
 
-			// Egg constants.
+			// Egg paramters.
 			var (
-				b = a * (15.0 / 11.0)
-				d = a * (2.0 / 11.0)
+				b = a * bDivA
+				d = a * dDivA
 			)
 
 			// Rotate from 0 to 360 degrees.
