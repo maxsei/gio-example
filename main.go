@@ -134,12 +134,8 @@ func draw(w *app.Window) error {
 						layout.Rigid(startButtonStyled),
 						// Add an egg.
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							// Get the size of the egg widget and create the egg widget.
-							eggDims := CreateEggWidget(nil)(gtx)
-							eggWidget = CreateEggWidget(&layout.Constraints{
-								Max: eggDims.Size,
-							})
-							return eggDims
+							eggWidget = CreateEggWidget(gtx.Constraints)
+							return layout.Dimensions{Size: gtx.Constraints.Max}
 						}),
 					)
 				}
@@ -176,13 +172,9 @@ func draw(w *app.Window) error {
 	}
 }
 
-func CreateEggWidget(constraints *layout.Constraints) layout.Widget {
+func CreateEggWidget(constraints layout.Constraints) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
-		// Set the constraints to the graphical context constrains if nil.
-		if constraints == nil {
-			return layout.Dimensions{Size: gtx.Constraints.Max}
-		}
-		gtx.Constraints = *constraints
+		gtx.Constraints = constraints
 
 		center := gtx.Constraints.Max.Div(2)
 		centerF32 := f32.Pt(float32(center.X), float32(center.Y))
