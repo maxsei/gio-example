@@ -46,9 +46,17 @@ func main() {
 }
 
 func draw(w *app.Window) error {
+	//////////////////////////////////////////////////////////////////////////////
+	//                              Draw Variables                              //
+	//////////////////////////////////////////////////////////////////////////////
 
 	// Variable that stores UI operations
 	var ops op.Ops
+	// If we click the start button we toggle boiling the egg.
+	var startButton widget.Clickable
+
+	// Use the builting material UI theme.
+	theme := material.NewTheme(gofont.Collection())
 
 	// Variables for incrementing progress bar.
 	var boiling bool
@@ -60,13 +68,54 @@ func draw(w *app.Window) error {
 	boilTicker := time.NewTicker(boilTickerDuration)
 	boilTicker.Stop()
 
-	// If we click the start button we toggle boiling the egg.
-	var startButton widget.Clickable
+	//////////////////////////////////////////////////////////////////////////////
+	//                              Define Widgets                              //
+	//////////////////////////////////////////////////////////////////////////////
 
-	// Use the builting material UI theme.
-	theme := material.NewTheme(gofont.Collection())
+	// Define flex layout with the following options.
+	flex := layout.Flex{
+		Axis:    layout.Vertical,
+		Spacing: layout.SpaceStart,
+	}
 
-	// listen for events in the window.
+	progressBar := func(gtx layout.Context) layout.Dimensions {
+		// Get a progress bar from the theme.
+		bar := material.ProgressBar(theme, progress)
+		// Return layout of bar after drawing.
+		return bar.Layout(gtx)
+	}
+
+	startButtonStyled := func(gtx layout.Context) layout.Dimensions {
+		// Create a margin inside the flex layout.
+		margin := layout.Inset{
+			Top:    unit.Dp(25),
+			Bottom: unit.Dp(25),
+			Right:  unit.Dp(35),
+			Left:   unit.Dp(35),
+		}
+
+		// Add button to the flex layout.
+		return margin.Layout(gtx,
+			func(gtx layout.Context) layout.Dimensions {
+				// Default state is to start boil else try to stop the boiling.
+				btnState := "Start"
+				if boiling {
+					btnState = "Stop"
+				}
+
+				// Style the button according to the theme to get a styled button back.
+				btn := material.Button(theme, &startButton, btnState)
+
+				// Add operations to the graphical context to draw the button.
+				return btn.Layout(gtx)
+			},
+		)
+	}
+
+	//////////////////////////////////////////////////////////////////////////////
+	//                               Program Loop                               //
+	//////////////////////////////////////////////////////////////////////////////
+
 	for {
 		select {
 		case e := <-w.Events():
@@ -74,54 +123,16 @@ func draw(w *app.Window) error {
 			if fe, ok := e.(system.FrameEvent); ok {
 				// Handle start button clicks here.
 				if startButton.Clicked() {
+					// Handle ticker.
 					if !boiling {
 						boilTicker.Reset(boilTickerDuration)
 					} else {
 						boilTicker.Stop()
 					}
+
+					// Toggle boiling.
 					boiling = !boiling
 				}
-
-				// Define flex layout with the following options.
-				flex := layout.Flex{
-					Axis:    layout.Vertical,
-					Spacing: layout.SpaceStart,
-				}
-
-				progressBar := func(gtx layout.Context) layout.Dimensions {
-					// Get a progress bar from the theme.
-					bar := material.ProgressBar(theme, progress)
-					// Return layout of bar after drawing.
-					return bar.Layout(gtx)
-				}
-
-				startButtonStyled := func(gtx layout.Context) layout.Dimensions {
-					// Create a margin inside the flex layout.
-					margin := layout.Inset{
-						Top:    unit.Dp(25),
-						Bottom: unit.Dp(25),
-						Right:  unit.Dp(35),
-						Left:   unit.Dp(35),
-					}
-
-					// Add button to the flex layout.
-					return margin.Layout(gtx,
-						func(gtx layout.Context) layout.Dimensions {
-							// Default state is to start boil else try to stop the boiling.
-							btnState := "Start"
-							if boiling {
-								btnState = "Stop"
-							}
-
-							// Style the button according to the theme to get a styled button back.
-							btn := material.Button(theme, &startButton, btnState)
-
-							// Add operations to the graphical context to draw the button.
-							return btn.Layout(gtx)
-						},
-					)
-				}
-
 				// Reverse rendering order to figure out the size of the egg widget.
 				var eggWidget layout.Widget
 				{
