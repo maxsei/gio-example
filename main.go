@@ -151,7 +151,6 @@ func draw(w *app.Window) error {
 				flex.Layout(gtx,
 					// Add an egg.
 					layout.Rigid(eggWidget),
-					// layout.Rigid(CreateEggWidget(nil)),
 					// Add a ProgressBar.
 					layout.Rigid(progressBar),
 					// Add a button with margins.
@@ -169,7 +168,9 @@ func draw(w *app.Window) error {
 
 		case <-boilTicker.C:
 			// Increment progress by the total boil time divided by the tick duration.
-			progress += (float32(boilTickerDuration) / float32(boilDuration))
+			if progress < 1 {
+				progress += (float32(boilTickerDuration) / float32(boilDuration))
+			}
 			w.Invalidate()
 		}
 	}
