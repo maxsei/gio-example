@@ -3,6 +3,7 @@ package main
 import (
 	"image/color"
 	"log"
+	"math"
 	"os"
 	"time"
 
@@ -24,6 +25,8 @@ type D layout.Dimensions
 
 // C is a type alias for layout.Constraints
 type C layout.Constraints
+
+var progress float32
 
 func main() {
 	go func() {
@@ -49,7 +52,7 @@ func draw(w *app.Window) error {
 
 	// Variables for incrementing progress bar.
 	var boiling bool
-	var progress float32
+	// var progress float32
 
 	// Create ticker for boiler that is created stopped.
 	const boilDuration time.Duration = time.Second * 5
@@ -148,6 +151,7 @@ func draw(w *app.Window) error {
 				flex.Layout(gtx,
 					// Add an egg.
 					layout.Rigid(eggWidget),
+					// layout.Rigid(CreateEggWidget(nil)),
 					// Add a ProgressBar.
 					layout.Rigid(progressBar),
 					// Add a button with margins.
@@ -175,31 +179,71 @@ func CreateEggWidget(constraints *layout.Constraints) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		// Set the constraints to the graphical context constrains if nil.
 		if constraints == nil {
-			constraints = &gtx.Constraints
+			return layout.Dimensions{Size: gtx.Constraints.Max}
 		}
+		gtx.Constraints = *constraints
+
+		// Start at this point.
+		// op.Offset(f32.Pt(x, y)).Add(gtx.Ops)
+
+		center := gtx.Constraints.Max.Div(2)
+		centerF32 := f32.Pt(float32(center.X), float32(center.Y))
+		op.Offset(centerF32).Add(gtx.Ops)
 
 		// Calculate the center and the radius of the circle.
-		center := constraints.Max.Div(2)
-		r := center.Y
+		a := float64(center.Y)
 		if center.X < center.Y {
-			r = center.X
+			a = float64(center.X)
+		}
+		a /= (17.0 / 11.0)
+
+		// Draw egg path.
+		var eggPath clip.Path
+		// eggPath.Move(centerF32)
+		func() {
+			// Begin the path and close it when function exits.
+			eggPath.Begin(gtx.Ops)
+			defer eggPath.Close()
+
+			// Egg constants.
+			var (
+				b = a * (15.0 / 11.0)
+				d = a * (2.0 / 11.0)
+			)
+
+			// Rotate from 0 to 360 degrees.
+			for deg := 0; deg < 360; deg++ {
+				rad := (float64(deg) / 360) * 2 * math.Pi
+				// Trig gives the distance in X and Y direction
+				cosT := math.Cos(rad)
+				sinT := math.Sin(rad)
+				// The x/y coordinates
+				x := a * cosT
+				y := -(math.Sqrt(b*b-d*d*cosT*cosT) + d*sinT) * sinT
+				y += d
+				// Finally the point on the outline
+				p := f32.Pt(float32(x), float32(y))
+
+				// If its the first time drawing move to the point else draw line.
+				if deg == 0 {
+					eggPath.MoveTo(p)
+					continue
+				}
+				// Draw the line to this point
+				eggPath.LineTo(p)
+			}
+		}()
+
+		eggArea := clip.Outline{Path: eggPath.End()}.Op()
+		// Fill the shape
+		color := color.NRGBA{
+			R: 255,
+			G: uint8(239 * (1 - progress)),
+			B: uint8(174 * (1 - progress)),
+			A: 255,
 		}
 
-		circle := clip.Circle{
-			// // Have circle start at bottom.
-			// Center: f32.Point{X: float32(center.X), Y: float32(2*center.Y - r)},
-
-			// Have circle centered.
-			Center: f32.Point{X: float32(center.X), Y: float32(center.Y)},
-			Radius: float32(r),
-		}
-
-		// Paint the circle red with the current graphical context.
-		circleColor := color.NRGBA{R: 255, A: 255}
-		paint.FillShape(gtx.Ops, circleColor, circle.Op(gtx.Ops))
-
-		// Return the dimensions that were drawn.
-		return layout.Dimensions{Size: constraints.Max}
+		paint.FillShape(gtx.Ops, color, eggArea)
+		return layout.Dimensions{Size: gtx.Constraints.Max}
 	}
-
 }
