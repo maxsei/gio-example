@@ -1,7 +1,6 @@
 package main
 
 import (
-	"image"
 	"image/color"
 	"log"
 	"os"
@@ -179,25 +178,28 @@ func CreateEggWidget(constraints *layout.Constraints) layout.Widget {
 			constraints = &gtx.Constraints
 		}
 
-		// Figure out how to calculate.
-		r := float32(constraints.Max.Y / 2)
-		// r := float32((gtx.Constraints.Max.Y - 80) / 2)
-		circle := clip.Circle{
-			// Center: f32.Point{X: 100, Y: 0},
-			Center: f32.Point{X: 2 * r, Y: r},
-			Radius: r,
+		// Calculate the center and the radius of the circle.
+		center := constraints.Max.Div(2)
+		r := center.Y
+		if center.X < center.Y {
+			r = center.X
 		}
 
-		circleColor := color.NRGBA{R: 255, A: 255}
+		circle := clip.Circle{
+			// // Have circle start at bottom.
+			// Center: f32.Point{X: float32(center.X), Y: float32(2*center.Y - r)},
+
+			// Have circle centered.
+			Center: f32.Point{X: float32(center.X), Y: float32(center.Y)},
+			Radius: float32(r),
+		}
 
 		// Paint the circle red with the current graphical context.
+		circleColor := color.NRGBA{R: 255, A: 255}
 		paint.FillShape(gtx.Ops, circleColor, circle.Op(gtx.Ops))
 
-		// Circle
-		dims := image.Point{Y: int(2 * r)}
-		dims.X = dims.Y
-
-		return layout.Dimensions{Size: dims}
+		// Return the dimensions that were drawn.
+		return layout.Dimensions{Size: constraints.Max}
 	}
 
 }
