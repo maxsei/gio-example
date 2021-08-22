@@ -1,10 +1,13 @@
 package main
 
 import (
+	"fmt"
 	"image/color"
 	"log"
 	"math"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"gioui.org/app"
@@ -15,6 +18,7 @@ import (
 	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
+	"gioui.org/text"
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
@@ -55,6 +59,9 @@ func draw(w *app.Window) error {
 	// If we click the start button we toggle boiling the egg.
 	var startButton widget.Clickable
 
+	// Only used for when predrawing the ui.
+	var preDraw bool = false
+
 	// Use the builting material UI theme.
 	theme := material.NewTheme(gofont.Collection())
 
@@ -63,10 +70,15 @@ func draw(w *app.Window) error {
 	// var progress float32
 
 	// Create ticker for boiler that is created stopped.
-	const boilDuration time.Duration = time.Second * 5
+	var boilDuration time.Duration
 	const boilTickerDuration time.Duration = time.Second / 25
 	boilTicker := time.NewTicker(boilTickerDuration)
 	boilTicker.Stop()
+
+	// Widget for inputing the boil duration.
+	var boilDurationInput widget.Editor
+	boilDurationInput.SingleLine = true
+	boilDurationInput.Alignment = text.Middle
 
 	//////////////////////////////////////////////////////////////////////////////
 	//                              Define Widgets                              //
@@ -102,6 +114,11 @@ func draw(w *app.Window) error {
 				if boiling {
 					btnState = "Stop"
 				}
+				if progress >= 1 {
+					btnState = "Finished"
+					boilTicker.Stop()
+					boiling = false
+				}
 
 				// Style the button according to the theme to get a styled button back.
 				btn := material.Button(theme, &startButton, btnState)
@@ -110,6 +127,47 @@ func draw(w *app.Window) error {
 				return btn.Layout(gtx)
 			},
 		)
+	}
+
+	// Boil duration input widget.
+	boilDurationInputWidget := func(gtx layout.Context) layout.Dimensions {
+		hzMarginPct := float32(0.95)
+		hzMargin := float32(gtx.Constraints.Max.X) * hzMarginPct / 2
+
+		margins := layout.Inset{
+			Top:    unit.Dp(20),
+			Bottom: unit.Dp(20),
+			Right:  unit.Dp(hzMargin),
+			Left:   unit.Dp(hzMargin),
+		}
+		border := widget.Border{
+			Color:        color.NRGBA{R: 0, G: 200, B: 125, A: 200},
+			CornerRadius: unit.Dp(4),
+			Width:        unit.Dp(2),
+		}
+
+		ed := material.Editor(theme, &widget.Editor{}, "sec")
+
+		if !preDraw {
+			ed = material.Editor(theme, &boilDurationInput, "sec")
+
+			// If boiling out how far along in the boiling process we are.
+			if boiling && progress < 1 {
+				boilRemain := (1 - progress) * float32(boilDuration) / float32(time.Second)
+				// Format to 1 decimal.
+				inputStr := fmt.Sprintf("%.1f", boilRemain)
+				// Update the text in the inputbox
+				boilDurationInput.SetText(inputStr)
+			}
+		}
+
+		layout := margins.Layout(gtx,
+			func(gtx layout.Context) layout.Dimensions {
+				return border.Layout(gtx, ed.Layout)
+			},
+		)
+
+		return layout
 	}
 
 	//////////////////////////////////////////////////////////////////////////////
@@ -130,12 +188,23 @@ func draw(w *app.Window) error {
 						boilTicker.Stop()
 					}
 
+					if progress >= 1 {
+						progress = 0
+					}
+
+					// Read from the input box
+					inputString := boilDurationInput.Text()
+					inputString = strings.TrimSpace(inputString)
+					inputFloat, _ := strconv.ParseFloat(inputString, 32)
+					boilDuration = time.Duration(inputFloat * float64(time.Second))
+
 					// Toggle boiling.
 					boiling = !boiling
 				}
 				// Reverse rendering order to figure out the size of the egg widget.
 				var eggWidget layout.Widget
 				{
+					preDraw = true
 					var ops op.Ops
 					gtx := layout.NewContext(&ops, fe)
 					flex.Layout(gtx,
@@ -143,12 +212,15 @@ func draw(w *app.Window) error {
 						layout.Rigid(progressBar),
 						// Add a button with margins.
 						layout.Rigid(startButtonStyled),
+						// Add a boil duration input widget.
+						layout.Rigid(boilDurationInputWidget),
 						// Add an egg.
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							eggWidget = CreateEggWidget(gtx.Constraints)
 							return layout.Dimensions{Size: gtx.Constraints.Max}
 						}),
 					)
+					preDraw = false
 				}
 
 				// Create graphical context that contains all the UI operations and the
@@ -158,6 +230,14 @@ func draw(w *app.Window) error {
 				flex.Layout(gtx,
 					// Add an egg.
 					layout.Rigid(eggWidget),
+					// layout.Rigid(CreateEggWidget(
+					// 	layout.Constraints{
+					// 		Min: image.Point{X: 1916, Y: 0},
+					// 		Max: image.Point{X: 1916, Y: 888},
+					// 	},
+					// )),
+					// Add a boil duration input widget.
+					layout.Rigid(boilDurationInputWidget),
 					// Add a ProgressBar.
 					layout.Rigid(progressBar),
 					// Add a button with margins.
