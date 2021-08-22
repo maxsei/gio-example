@@ -69,6 +69,7 @@ func draw(w *app.Window) error {
 	var boilDuration time.Duration
 	const boilTickerFreq time.Duration = time.Second / 25
 	boilTicker := NewBoilTimer(boilTickerFreq, boilDuration)
+	boilTicker.Stop(nil)
 
 	// Widget for inputing the boil duration.
 	const boilDurationPrecision int = 1
@@ -189,12 +190,13 @@ func draw(w *app.Window) error {
 						boilTicker.Reset(&boilDuration)
 					}
 
-					// Toggle boiling.
-					toggle := boilTicker.Start
-					if boilTicker.Boiling() {
-						toggle = boilTicker.Stop
+					// Handle ticker.
+					if !boilTicker.Boiling() {
+						boilTicker.Start(nil)
+					} else {
+						boilTicker.Stop(nil)
 					}
-					toggle(nil)
+
 				}
 
 				// Reverse rendering order to figure out the size of the egg widget.
@@ -333,9 +335,6 @@ func NewBoilTimer(freq, duration time.Duration) *BoilTimer {
 		progress:   0.0,
 		progressCh: make(chan float64),
 	}
-
-	// Initialize stopped timer.
-	bt.Stop(nil)
 
 	go func() {
 		fmt.Println("init")
