@@ -30,7 +30,7 @@ type D layout.Dimensions
 // C is a type alias for layout.Constraints
 type C layout.Constraints
 
-var progress float32
+var progress float64
 
 func main() {
 	go func() {
@@ -65,17 +65,13 @@ func draw(w *app.Window) error {
 	// Use the builting material UI theme.
 	theme := material.NewTheme(gofont.Collection())
 
-	// Variables for incrementing progress bar.
-	var boiling bool
-	// var progress float32
-
 	// Create ticker for boiler that is created stopped.
 	var boilDuration time.Duration
-	const boilTickerDuration time.Duration = time.Second / 25
-	boilTicker := time.NewTicker(boilTickerDuration)
-	boilTicker.Stop()
+	const boilTickerFreq time.Duration = time.Second / 25
+	boilTicker := NewBoilTimer(boilTickerFreq, boilDuration)
 
 	// Widget for inputing the boil duration.
+	const boilDurationPrecision int = 1
 	var boilDurationInput widget.Editor
 	boilDurationInput.SingleLine = true
 	boilDurationInput.Alignment = text.Middle
@@ -92,7 +88,7 @@ func draw(w *app.Window) error {
 
 	progressBar := func(gtx layout.Context) layout.Dimensions {
 		// Get a progress bar from the theme.
-		bar := material.ProgressBar(theme, progress)
+		bar := material.ProgressBar(theme, float32(progress))
 		// Return layout of bar after drawing.
 		return bar.Layout(gtx)
 	}
@@ -111,13 +107,12 @@ func draw(w *app.Window) error {
 			func(gtx layout.Context) layout.Dimensions {
 				// Default state is to start boil else try to stop the boiling.
 				btnState := "Start"
-				if boiling {
+				if boilTicker.Boiling() {
 					btnState = "Stop"
 				}
 				if progress >= 1 {
 					btnState = "Finished"
-					boilTicker.Stop()
-					boiling = false
+					boilTicker.Stop(nil)
 				}
 
 				// Style the button according to the theme to get a styled button back.
@@ -152,12 +147,13 @@ func draw(w *app.Window) error {
 			ed = material.Editor(theme, &boilDurationInput, "sec")
 
 			// If boiling out how far along in the boiling process we are.
-			if boiling && progress < 1 {
-				boilRemain := (1 - progress) * float32(boilDuration) / float32(time.Second)
+			if boilTicker.Boiling() && progress < 1 {
+				boilRemain := float64(boilTicker.BoilRemain(progress)) / float64(time.Second)
 				// Format to 1 decimal.
-				inputStr := fmt.Sprintf("%.1f", boilRemain)
+				precisionStr := fmt.Sprintf("%%.%df", boilDurationPrecision)
+				boilRemainStr := fmt.Sprintf(precisionStr, boilRemain)
 				// Update the text in the inputbox
-				boilDurationInput.SetText(inputStr)
+				boilDurationInput.SetText(boilRemainStr)
 			}
 		}
 
@@ -181,26 +177,26 @@ func draw(w *app.Window) error {
 			if fe, ok := e.(system.FrameEvent); ok {
 				// Handle start button clicks here.
 				if startButton.Clicked() {
-					// Handle ticker.
-					if !boiling {
-						boilTicker.Reset(boilTickerDuration)
-					} else {
-						boilTicker.Stop()
-					}
-
-					if progress >= 1 {
-						progress = 0
-					}
-
 					// Read from the input box
 					inputString := boilDurationInput.Text()
 					inputString = strings.TrimSpace(inputString)
 					inputFloat, _ := strconv.ParseFloat(inputString, 32)
-					boilDuration = time.Duration(inputFloat * float64(time.Second))
+
+					// Check if the output of the ticker has changed significantly
+					boilRemain := float64(boilTicker.BoilRemain(progress))
+					if math.Abs(boilRemain-inputFloat) > math.Pow10(-boilDurationPrecision) {
+						boilDuration = time.Duration(inputFloat * float64(time.Second))
+						boilTicker.Reset(&boilDuration)
+					}
 
 					// Toggle boiling.
-					boiling = !boiling
+					toggle := boilTicker.Start
+					if boilTicker.Boiling() {
+						toggle = boilTicker.Stop
+					}
+					toggle(nil)
 				}
+
 				// Reverse rendering order to figure out the size of the egg widget.
 				var eggWidget layout.Widget
 				{
@@ -230,12 +226,6 @@ func draw(w *app.Window) error {
 				flex.Layout(gtx,
 					// Add an egg.
 					layout.Rigid(eggWidget),
-					// layout.Rigid(CreateEggWidget(
-					// 	layout.Constraints{
-					// 		Min: image.Point{X: 1916, Y: 0},
-					// 		Max: image.Point{X: 1916, Y: 888},
-					// 	},
-					// )),
 					// Add a boil duration input widget.
 					layout.Rigid(boilDurationInputWidget),
 					// Add a ProgressBar.
@@ -253,11 +243,8 @@ func draw(w *app.Window) error {
 				return de.Err
 			}
 
-		case <-boilTicker.C:
-			// Increment progress by the total boil time divided by the tick duration.
-			if progress < 1 {
-				progress += (float32(boilTickerDuration) / float32(boilDuration))
-			}
+		case progress = <-boilTicker.ProgressCh():
+			// fmt.Printf("progress = %+v\n", progress)
 			w.Invalidate()
 		}
 	}
@@ -335,4 +322,79 @@ func CreateEggWidget(constraints layout.Constraints) layout.Widget {
 		paint.FillShape(gtx.Ops, color, eggArea)
 		return layout.Dimensions{Size: gtx.Constraints.Max}
 	}
+}
+
+func NewBoilTimer(freq, duration time.Duration) *BoilTimer {
+	bt := BoilTimer{
+		freq:       freq,
+		duration:   duration,
+		ticker:     time.NewTicker(freq),
+		boiling:    false,
+		progress:   0.0,
+		progressCh: make(chan float64),
+	}
+
+	// Initialize stopped timer.
+	bt.Stop(nil)
+
+	go func() {
+		fmt.Println("init")
+
+		for _ = range bt.ticker.C {
+			// Increment progress by the total boil time divided by the tick duration.
+			fmt.Printf("progress = %+v\n", progress)
+			if bt.progress < 1 {
+				bt.progress += (float64(bt.freq) / float64(bt.duration))
+				bt.progressCh <- bt.progress
+			}
+		}
+	}()
+
+	return &bt
+}
+
+type BoilTimer struct {
+	freq       time.Duration
+	duration   time.Duration
+	boiling    bool
+	ticker     *time.Ticker
+	progress   float64
+	progressCh chan float64
+}
+
+func (bt *BoilTimer) setDuration(duration *time.Duration) {
+	if duration != nil {
+		bt.duration = *duration
+	}
+}
+
+func (bt *BoilTimer) Start(duration *time.Duration) {
+	bt.ticker.Stop()
+	bt.setDuration(duration)
+	bt.boiling = true
+	bt.ticker.Reset(bt.freq)
+}
+
+func (bt *BoilTimer) Stop(duration *time.Duration) {
+	bt.ticker.Stop()
+	bt.setDuration(duration)
+	bt.boiling = false
+}
+
+func (bt *BoilTimer) Reset(duration *time.Duration) {
+	bt.progress = 0
+	go func() { bt.progressCh <- 0 }()
+	bt.Stop(duration)
+}
+
+func (bt *BoilTimer) Restart(duration *time.Duration) {
+	bt.progress = 0
+	go func() { bt.progressCh <- 0 }()
+	bt.Start(duration)
+}
+
+func (bt *BoilTimer) Boiling() bool              { return bt.boiling }
+func (bt *BoilTimer) ProgressCh() <-chan float64 { return bt.progressCh }
+func (bt *BoilTimer) BoilRemain(progress float64) time.Duration {
+	return time.Duration((1 - progress) * float64(bt.duration))
 }
