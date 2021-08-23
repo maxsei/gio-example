@@ -25,10 +25,10 @@ import (
 )
 
 // D is a type alias for layout.Dimensions
-type D layout.Dimensions
+type D = layout.Dimensions
 
 // C is a type alias for layout.Constraints
-type C layout.Constraints
+type C = layout.Constraints
 
 var progress float64
 
@@ -87,14 +87,14 @@ func draw(w *app.Window) error {
 		Spacing: layout.SpaceStart,
 	}
 
-	progressBar := func(gtx layout.Context) layout.Dimensions {
+	progressBar := func(gtx layout.Context) D {
 		// Get a progress bar from the theme.
 		bar := material.ProgressBar(theme, float32(progress))
 		// Return layout of bar after drawing.
 		return bar.Layout(gtx)
 	}
 
-	startButtonStyled := func(gtx layout.Context) layout.Dimensions {
+	startButtonStyled := func(gtx layout.Context) D {
 		// Create a margin inside the flex layout.
 		margin := layout.Inset{
 			Top:    unit.Dp(25),
@@ -105,7 +105,7 @@ func draw(w *app.Window) error {
 
 		// Add button to the flex layout.
 		return margin.Layout(gtx,
-			func(gtx layout.Context) layout.Dimensions {
+			func(gtx layout.Context) D {
 				// Default state is to start boil else try to stop the boiling.
 				btnState := "Start"
 				if boilTicker.Boiling() {
@@ -126,7 +126,7 @@ func draw(w *app.Window) error {
 	}
 
 	// Boil duration input widget.
-	boilDurationInputWidget := func(gtx layout.Context) layout.Dimensions {
+	boilDurationInputWidget := func(gtx layout.Context) D {
 		hzMarginPct := float32(0.95)
 		hzMargin := float32(gtx.Constraints.Max.X) * hzMarginPct / 2
 
@@ -159,7 +159,7 @@ func draw(w *app.Window) error {
 		}
 
 		layout := margins.Layout(gtx,
-			func(gtx layout.Context) layout.Dimensions {
+			func(gtx layout.Context) D {
 				return border.Layout(gtx, ed.Layout)
 			},
 		)
@@ -213,9 +213,9 @@ func draw(w *app.Window) error {
 						// Add a boil duration input widget.
 						layout.Rigid(boilDurationInputWidget),
 						// Add an egg.
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						layout.Rigid(func(gtx layout.Context) D {
 							eggWidget = CreateEggWidget(gtx.Constraints)
-							return layout.Dimensions{Size: gtx.Constraints.Max}
+							return D{Size: gtx.Constraints.Max}
 						}),
 					)
 					preDraw = false
@@ -252,8 +252,8 @@ func draw(w *app.Window) error {
 	}
 }
 
-func CreateEggWidget(constraints layout.Constraints) layout.Widget {
-	return func(gtx layout.Context) layout.Dimensions {
+func CreateEggWidget(constraints C) layout.Widget {
+	return func(gtx layout.Context) D {
 		gtx.Constraints = constraints
 
 		center := gtx.Constraints.Max.Div(2)
@@ -322,7 +322,7 @@ func CreateEggWidget(constraints layout.Constraints) layout.Widget {
 		}
 
 		paint.FillShape(gtx.Ops, color, eggArea)
-		return layout.Dimensions{Size: gtx.Constraints.Max}
+		return D{Size: gtx.Constraints.Max}
 	}
 }
 
