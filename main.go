@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gioui.org/app"
@@ -53,7 +54,7 @@ func draw(w *app.Window) error {
 
 	const boilTickerFreq time.Duration = time.Second / 25
 	boilTimer := NewBoilTimer(boilTickerFreq, 0)
-	eggWidget := NewEggWidget(boilTimer)
+	eggWidget := NewEggWidget(boilTimer, 1)
 	defer eggWidget.Close()
 
 	for {
@@ -82,7 +83,7 @@ func draw(w *app.Window) error {
 	}
 }
 
-func NewEggWidget(boilTimer *BoilTimer) *EggWidget {
+func NewEggWidget(boilTimer *BoilTimer, precision int) *EggWidget {
 	e := EggWidget{
 		boilTicker:  boilTimer,
 		startButton: &widget.Clickable{},
@@ -92,11 +93,14 @@ func NewEggWidget(boilTimer *BoilTimer) *EggWidget {
 		},
 		theme:   material.NewTheme(gofont.Collection()),
 		updates: make(chan struct{}),
+		m:       &sync.Mutex{},
 	}
 
 	go func() {
 		for progressNew := range e.boilTicker.ProgressCh() {
+			e.m.Lock()
 			e.progress = progressNew
+			e.m.Unlock()
 			e.updates <- struct{}{}
 		}
 	}()
@@ -109,9 +113,11 @@ type EggWidget struct {
 	startButton       *widget.Clickable
 	boilDuration      time.Duration
 	boilDurationInput widget.Editor
+	boilPrecision     int
 	theme             *material.Theme
 	updates           chan struct{}
 	progress          float64
+	m                 *sync.Mutex
 }
 
 func (e *EggWidget) Tick() <-chan struct{} { return e.updates }
@@ -124,6 +130,10 @@ func (e *EggWidget) Layout(gtx layout.Context) D {
 	// Only used for when predrawing the ui.
 	var preDraw bool = false
 
+	e.m.Lock()
+	progress := e.progress
+	e.m.Unlock()
+
 	// Widget for inputing the boil duration.
 	const boilDurationPrecision int = 1
 
@@ -135,7 +145,7 @@ func (e *EggWidget) Layout(gtx layout.Context) D {
 
 	progressBar := func(gtx layout.Context) D {
 		// Get a progress bar from the theme.
-		bar := material.ProgressBar(e.theme, float32(e.progress))
+		bar := material.ProgressBar(e.theme, float32(progress))
 		// Return layout of bar after drawing.
 		return bar.Layout(gtx)
 	}
@@ -157,7 +167,7 @@ func (e *EggWidget) Layout(gtx layout.Context) D {
 				if e.boilTicker.Boiling() {
 					btnState = "Stop"
 				}
-				if e.progress >= 1 {
+				if progress >= 1 {
 					btnState = "Finished"
 					e.boilTicker.Stop(nil)
 				}
@@ -193,8 +203,8 @@ func (e *EggWidget) Layout(gtx layout.Context) D {
 			ed = material.Editor(e.theme, &e.boilDurationInput, "sec")
 
 			// If boiling out how far along in the boiling process we are.
-			if e.boilTicker.Boiling() && e.progress < 1 {
-				boilRemain := float64(e.boilTicker.BoilRemain(e.progress)) / float64(time.Second)
+			if e.boilTicker.Boiling() && progress < 1 {
+				boilRemain := float64(e.boilTicker.BoilRemain(progress)) / float64(time.Second)
 				// Format to 1 decimal.
 				precisionStr := fmt.Sprintf("%%.%df", boilDurationPrecision)
 				boilRemainStr := fmt.Sprintf(precisionStr, boilRemain)
@@ -276,8 +286,8 @@ func (e *EggWidget) Layout(gtx layout.Context) D {
 			// Fill the shape
 			color := color.NRGBA{
 				R: 255,
-				G: uint8(239 * (1 - e.progress)),
-				B: uint8(174 * (1 - e.progress)),
+				G: uint8(239 * (1 - progress)),
+				B: uint8(174 * (1 - progress)),
 				A: 255,
 			}
 
@@ -294,7 +304,7 @@ func (e *EggWidget) Layout(gtx layout.Context) D {
 		inputFloat, _ := strconv.ParseFloat(inputString, 32)
 
 		// Check if the output of the ticker has changed significantly
-		boilRemain := float64(e.boilTicker.BoilRemain(e.progress))
+		boilRemain := float64(e.boilTicker.BoilRemain(progress))
 		if math.Abs(boilRemain-inputFloat) > math.Pow10(-boilDurationPrecision) {
 			e.boilDuration = time.Duration(inputFloat * float64(time.Second))
 			e.boilTicker.Reset(&e.boilDuration)
