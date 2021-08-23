@@ -30,8 +30,6 @@ type D = layout.Dimensions
 // C is a type alias for layout.Constraints
 type C = layout.Constraints
 
-var progress float64
-
 func main() {
 	go func() {
 		// create new window
@@ -50,36 +48,84 @@ func main() {
 }
 
 func draw(w *app.Window) error {
-	//////////////////////////////////////////////////////////////////////////////
-	//                              Draw Variables                              //
-	//////////////////////////////////////////////////////////////////////////////
-
 	// Variable that stores UI operations
 	var ops op.Ops
-	// If we click the start button we toggle boiling the egg.
-	var startButton widget.Clickable
 
+	const boilTickerFreq time.Duration = time.Second / 25
+	boilTimer := NewBoilTimer(boilTickerFreq, 0)
+	eggWidget := NewEggWidget(boilTimer)
+	defer eggWidget.Close()
+
+	for {
+		select {
+		case e := <-w.Events():
+			// Frame event.
+			if fe, ok := e.(system.FrameEvent); ok {
+				// Create graphical context that contains all the UI operations and the
+				// frame event that triggered them.
+				gtx := layout.NewContext(&ops, fe)
+
+				eggWidget.Layout(gtx)
+
+				// Add the list of operations to the frame event.
+				fe.Frame(gtx.Ops)
+			}
+
+			// Window is destroyed.
+			if de, ok := e.(system.DestroyEvent); ok {
+				return de.Err
+			}
+
+		case <-eggWidget.Tick():
+			w.Invalidate()
+		}
+	}
+}
+
+func NewEggWidget(boilTimer *BoilTimer) *EggWidget {
+	e := EggWidget{
+		boilTicker:  boilTimer,
+		startButton: &widget.Clickable{},
+		boilDurationInput: widget.Editor{
+			Alignment:  text.Middle,
+			SingleLine: true,
+		},
+		theme:   material.NewTheme(gofont.Collection()),
+		updates: make(chan struct{}),
+	}
+
+	go func() {
+		for progressNew := range e.boilTicker.ProgressCh() {
+			e.progress = progressNew
+			e.updates <- struct{}{}
+		}
+	}()
+
+	return &e
+}
+
+type EggWidget struct {
+	boilTicker        *BoilTimer
+	startButton       *widget.Clickable
+	boilDuration      time.Duration
+	boilDurationInput widget.Editor
+	theme             *material.Theme
+	updates           chan struct{}
+	progress          float64
+}
+
+func (e *EggWidget) Tick() <-chan struct{} { return e.updates }
+func (e *EggWidget) Close() {
+	close(e.updates)
+	e.boilTicker.Close()
+}
+
+func (e *EggWidget) Layout(gtx layout.Context) D {
 	// Only used for when predrawing the ui.
 	var preDraw bool = false
 
-	// Use the builting material UI theme.
-	theme := material.NewTheme(gofont.Collection())
-
-	// Create ticker for boiler that is created stopped.
-	var boilDuration time.Duration
-	const boilTickerFreq time.Duration = time.Second / 25
-	boilTicker := NewBoilTimer(boilTickerFreq, boilDuration)
-	boilTicker.Stop(nil)
-
 	// Widget for inputing the boil duration.
 	const boilDurationPrecision int = 1
-	var boilDurationInput widget.Editor
-	boilDurationInput.SingleLine = true
-	boilDurationInput.Alignment = text.Middle
-
-	//////////////////////////////////////////////////////////////////////////////
-	//                              Define Widgets                              //
-	//////////////////////////////////////////////////////////////////////////////
 
 	// Define flex layout with the following options.
 	flex := layout.Flex{
@@ -89,7 +135,7 @@ func draw(w *app.Window) error {
 
 	progressBar := func(gtx layout.Context) D {
 		// Get a progress bar from the theme.
-		bar := material.ProgressBar(theme, float32(progress))
+		bar := material.ProgressBar(e.theme, float32(e.progress))
 		// Return layout of bar after drawing.
 		return bar.Layout(gtx)
 	}
@@ -108,16 +154,16 @@ func draw(w *app.Window) error {
 			func(gtx layout.Context) D {
 				// Default state is to start boil else try to stop the boiling.
 				btnState := "Start"
-				if boilTicker.Boiling() {
+				if e.boilTicker.Boiling() {
 					btnState = "Stop"
 				}
-				if progress >= 1 {
+				if e.progress >= 1 {
 					btnState = "Finished"
-					boilTicker.Stop(nil)
+					e.boilTicker.Stop(nil)
 				}
 
 				// Style the button according to the theme to get a styled button back.
-				btn := material.Button(theme, &startButton, btnState)
+				btn := material.Button(e.theme, e.startButton, btnState)
 
 				// Add operations to the graphical context to draw the button.
 				return btn.Layout(gtx)
@@ -142,19 +188,18 @@ func draw(w *app.Window) error {
 			Width:        unit.Dp(2),
 		}
 
-		ed := material.Editor(theme, &widget.Editor{}, "sec")
-
+		ed := material.Editor(e.theme, &widget.Editor{}, "sec")
 		if !preDraw {
-			ed = material.Editor(theme, &boilDurationInput, "sec")
+			ed = material.Editor(e.theme, &e.boilDurationInput, "sec")
 
 			// If boiling out how far along in the boiling process we are.
-			if boilTicker.Boiling() && progress < 1 {
-				boilRemain := float64(boilTicker.BoilRemain(progress)) / float64(time.Second)
+			if e.boilTicker.Boiling() && e.progress < 1 {
+				boilRemain := float64(e.boilTicker.BoilRemain(e.progress)) / float64(time.Second)
 				// Format to 1 decimal.
 				precisionStr := fmt.Sprintf("%%.%df", boilDurationPrecision)
 				boilRemainStr := fmt.Sprintf(precisionStr, boilRemain)
 				// Update the text in the inputbox
-				boilDurationInput.SetText(boilRemainStr)
+				e.boilDurationInput.SetText(boilRemainStr)
 			}
 		}
 
@@ -167,162 +212,135 @@ func draw(w *app.Window) error {
 		return layout
 	}
 
-	//////////////////////////////////////////////////////////////////////////////
-	//                               Program Loop                               //
-	//////////////////////////////////////////////////////////////////////////////
+	CreateEggWidget := func(constraints C) layout.Widget {
+		return func(gtx layout.Context) D {
+			gtx.Constraints = constraints
 
-	for {
-		select {
-		case e := <-w.Events():
-			// Frame event.
-			if fe, ok := e.(system.FrameEvent); ok {
-				// Handle start button clicks here.
-				if startButton.Clicked() {
-					// Read from the input box
-					inputString := boilDurationInput.Text()
-					inputString = strings.TrimSpace(inputString)
-					inputFloat, _ := strconv.ParseFloat(inputString, 32)
+			center := gtx.Constraints.Max.Div(2)
+			centerF32 := f32.Pt(float32(center.X), float32(center.Y))
+			op.Offset(centerF32).Add(gtx.Ops)
 
-					// Check if the output of the ticker has changed significantly
-					boilRemain := float64(boilTicker.BoilRemain(progress))
-					if math.Abs(boilRemain-inputFloat) > math.Pow10(-boilDurationPrecision) {
-						boilDuration = time.Duration(inputFloat * float64(time.Second))
-						boilTicker.Reset(&boilDuration)
-					}
-
-					// Handle ticker.
-					if !boilTicker.Boiling() {
-						boilTicker.Start(nil)
-					} else {
-						boilTicker.Stop(nil)
-					}
-
-				}
-
-				// Reverse rendering order to figure out the size of the egg widget.
-				var eggWidget layout.Widget
-				{
-					preDraw = true
-					var ops op.Ops
-					gtx := layout.NewContext(&ops, fe)
-					flex.Layout(gtx,
-						// Add a ProgressBar.
-						layout.Rigid(progressBar),
-						// Add a button with margins.
-						layout.Rigid(startButtonStyled),
-						// Add a boil duration input widget.
-						layout.Rigid(boilDurationInputWidget),
-						// Add an egg.
-						layout.Rigid(func(gtx layout.Context) D {
-							eggWidget = CreateEggWidget(gtx.Constraints)
-							return D{Size: gtx.Constraints.Max}
-						}),
-					)
-					preDraw = false
-				}
-
-				// Create graphical context that contains all the UI operations and the
-				// frame event that triggered them.
-				gtx := layout.NewContext(&ops, fe)
-
-				flex.Layout(gtx,
-					// Add an egg.
-					layout.Rigid(eggWidget),
-					// Add a boil duration input widget.
-					layout.Rigid(boilDurationInputWidget),
-					// Add a ProgressBar.
-					layout.Rigid(progressBar),
-					// Add a button with margins.
-					layout.Rigid(startButtonStyled),
-				)
-
-				// Add the list of operations to the frame event.
-				fe.Frame(gtx.Ops)
+			// Calculate the center and the radius of the circle.
+			r := float64(center.Y)
+			if center.X < center.Y {
+				r = float64(center.X)
 			}
 
-			// Window is destroyed.
-			if de, ok := e.(system.DestroyEvent); ok {
-				return de.Err
-			}
-
-		case progress = <-boilTicker.ProgressCh():
-			w.Invalidate()
-		}
-	}
-}
-
-func CreateEggWidget(constraints C) layout.Widget {
-	return func(gtx layout.Context) D {
-		gtx.Constraints = constraints
-
-		center := gtx.Constraints.Max.Div(2)
-		centerF32 := f32.Pt(float32(center.X), float32(center.Y))
-		op.Offset(centerF32).Add(gtx.Ops)
-
-		// Calculate the center and the radius of the circle.
-		r := float64(center.Y)
-		if center.X < center.Y {
-			r = float64(center.X)
-		}
-
-		// Constants that relate a to the other variables
-		const (
-			bDivA = (15.0 / 11.0)
-			dDivA = (2.0 / 11.0)
-		)
-
-		// 'a' radius is related in this way to the radius of the circle.
-		a := r / (bDivA + dDivA)
-
-		// Draw egg path.
-		var eggPath clip.Path
-		// eggPath.Move(centerF32)
-		func() {
-			// Begin the path and close it when function exits.
-			eggPath.Begin(gtx.Ops)
-			defer eggPath.Close()
-
-			// Egg paramters.
-			var (
-				b = a * bDivA
-				d = a * dDivA
+			// Constants that relate a to the other variables
+			const (
+				bDivA = (15.0 / 11.0)
+				dDivA = (2.0 / 11.0)
 			)
 
-			// Rotate from 0 to 360 degrees.
-			for deg := 0; deg < 360; deg++ {
-				rad := (float64(deg) / 360) * 2 * math.Pi
-				// Trig gives the distance in X and Y direction
-				cosT := math.Cos(rad)
-				sinT := math.Sin(rad)
-				// The x/y coordinates
-				x := a * cosT
-				y := -(math.Sqrt(b*b-d*d*cosT*cosT) + d*sinT) * sinT
-				y += d
-				// Finally the point on the outline
-				p := f32.Pt(float32(x), float32(y))
+			// 'a' radius is related in this way to the radius of the circle.
+			a := r / (bDivA + dDivA)
 
-				// If its the first time drawing move to the point else draw line.
-				if deg == 0 {
-					eggPath.MoveTo(p)
-					continue
+			// Draw egg path.
+			var eggPath clip.Path
+			// eggPath.Move(centerF32)
+			func() {
+				// Begin the path and close it when function exits.
+				eggPath.Begin(gtx.Ops)
+				defer eggPath.Close()
+
+				// Egg paramters.
+				var (
+					b = a * bDivA
+					d = a * dDivA
+				)
+
+				// Rotate from 0 to 360 degrees.
+				for deg := 0; deg < 360; deg++ {
+					rad := (float64(deg) / 360) * 2 * math.Pi
+					// Trig gives the distance in X and Y direction
+					cosT := math.Cos(rad)
+					sinT := math.Sin(rad)
+					// The x/y coordinates
+					x := a * cosT
+					y := -(math.Sqrt(b*b-d*d*cosT*cosT) + d*sinT) * sinT
+					y += d
+					// Finally the point on the outline
+					p := f32.Pt(float32(x), float32(y))
+
+					// If its the first time drawing move to the point else draw line.
+					if deg == 0 {
+						eggPath.MoveTo(p)
+						continue
+					}
+					// Draw the line to this point
+					eggPath.LineTo(p)
 				}
-				// Draw the line to this point
-				eggPath.LineTo(p)
-			}
-		}()
+			}()
 
-		eggArea := clip.Outline{Path: eggPath.End()}.Op()
-		// Fill the shape
-		color := color.NRGBA{
-			R: 255,
-			G: uint8(239 * (1 - progress)),
-			B: uint8(174 * (1 - progress)),
-			A: 255,
+			eggArea := clip.Outline{Path: eggPath.End()}.Op()
+			// Fill the shape
+			color := color.NRGBA{
+				R: 255,
+				G: uint8(239 * (1 - e.progress)),
+				B: uint8(174 * (1 - e.progress)),
+				A: 255,
+			}
+
+			paint.FillShape(gtx.Ops, color, eggArea)
+			return D{Size: gtx.Constraints.Max}
+		}
+	}
+
+	// Handle start button clicks here.
+	if e.startButton.Clicked() {
+		// Read from the input box
+		inputString := e.boilDurationInput.Text()
+		inputString = strings.TrimSpace(inputString)
+		inputFloat, _ := strconv.ParseFloat(inputString, 32)
+
+		// Check if the output of the ticker has changed significantly
+		boilRemain := float64(e.boilTicker.BoilRemain(e.progress))
+		if math.Abs(boilRemain-inputFloat) > math.Pow10(-boilDurationPrecision) {
+			e.boilDuration = time.Duration(inputFloat * float64(time.Second))
+			e.boilTicker.Reset(&e.boilDuration)
 		}
 
-		paint.FillShape(gtx.Ops, color, eggArea)
-		return D{Size: gtx.Constraints.Max}
+		// Handle ticker.
+		if !e.boilTicker.Boiling() {
+			e.boilTicker.Start(nil)
+		} else {
+			e.boilTicker.Stop(nil)
+		}
 	}
+
+	// Reverse rendering order to figure out the size of the egg widget.
+	var eggWidget layout.Widget
+	{
+		preDraw = true
+		gtxRev := gtx
+		gtxRev.Ops = &op.Ops{}
+
+		flex.Layout(gtxRev,
+			// Add a ProgressBar.
+			layout.Rigid(progressBar),
+			// Add a button with margins.
+			layout.Rigid(startButtonStyled),
+			// Add a boil duration input widget.
+			layout.Rigid(boilDurationInputWidget),
+			// Add an egg.
+			layout.Rigid(func(gtx layout.Context) D {
+				eggWidget = CreateEggWidget(gtx.Constraints)
+				return D{Size: gtx.Constraints.Max}
+			}),
+		)
+		preDraw = false
+	}
+
+	return flex.Layout(gtx,
+		// Add an egg.
+		layout.Rigid(eggWidget),
+		// Add a boil duration input widget.
+		layout.Rigid(boilDurationInputWidget),
+		// Add a ProgressBar.
+		layout.Rigid(progressBar),
+		// Add a button with margins.
+		layout.Rigid(startButtonStyled),
+	)
 }
 
 func NewBoilTimer(freq, duration time.Duration) *BoilTimer {
@@ -333,16 +351,24 @@ func NewBoilTimer(freq, duration time.Duration) *BoilTimer {
 		boiling:    false,
 		progress:   0.0,
 		progressCh: make(chan float64),
+		closer:     make(chan struct{}),
 	}
 
 	go func() {
-		for _ = range bt.ticker.C {
-			// Increment progress by the total boil time divided by the tick duration.
-			if bt.progress < 1 {
-				bt.progress += (float64(bt.freq) / float64(bt.duration))
-				bt.progressCh <- bt.progress
+		var done bool
+		for !done {
+			select {
+			case <-bt.ticker.C:
+				// Increment progress by the total boil time divided by the tick duration.
+				if bt.progress < 1 {
+					bt.progress += (float64(bt.freq) / float64(bt.duration))
+					bt.progressCh <- bt.progress
+				}
+			case <-bt.closer:
+				done = true
 			}
 		}
+		close(bt.progressCh)
 	}()
 
 	return &bt
@@ -355,6 +381,7 @@ type BoilTimer struct {
 	ticker     *time.Ticker
 	progress   float64
 	progressCh chan float64
+	closer     chan struct{}
 }
 
 func (bt *BoilTimer) setDuration(duration *time.Duration) {
@@ -390,6 +417,7 @@ func (bt *BoilTimer) Restart(duration *time.Duration) {
 
 func (bt *BoilTimer) Boiling() bool              { return bt.boiling }
 func (bt *BoilTimer) ProgressCh() <-chan float64 { return bt.progressCh }
+func (bt *BoilTimer) Close()                     { bt.closer <- struct{}{} }
 func (bt *BoilTimer) BoilRemain(progress float64) time.Duration {
 	return time.Duration((1 - progress) * float64(bt.duration))
 }
