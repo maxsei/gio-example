@@ -246,7 +246,6 @@ func draw(w *app.Window) error {
 			}
 
 		case progress = <-boilTicker.ProgressCh():
-			// fmt.Printf("progress = %+v\n", progress)
 			w.Invalidate()
 		}
 	}
@@ -337,11 +336,8 @@ func NewBoilTimer(freq, duration time.Duration) *BoilTimer {
 	}
 
 	go func() {
-		fmt.Println("init")
-
 		for _ = range bt.ticker.C {
 			// Increment progress by the total boil time divided by the tick duration.
-			fmt.Printf("progress = %+v\n", progress)
 			if bt.progress < 1 {
 				bt.progress += (float64(bt.freq) / float64(bt.duration))
 				bt.progressCh <- bt.progress
