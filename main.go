@@ -362,6 +362,10 @@ func NewBoilTimer(freq, duration time.Duration) *BoilTimer {
 				// Increment progress by the total boil time divided by the tick duration.
 				if bt.progress < 1 {
 					bt.progress += (float64(bt.freq) / float64(bt.duration))
+					if bt.duration == 0 {
+						bt.progressCh <- 0
+						continue
+					}
 					bt.progressCh <- bt.progress
 				}
 			case <-bt.closer:
