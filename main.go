@@ -8,7 +8,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"gioui.org/app"
@@ -77,65 +76,79 @@ func draw(w *app.Window) error {
 				return de.Err
 			}
 
-		case <-eggWidget.Tick():
+		case state := <-eggWidget.boilTicker.C():
+			eggWidget.boilTimerState = state
 			w.Invalidate()
 		}
 	}
 }
 
 func NewEggWidget(boilTimer *BoilTimer, precision int) *EggWidget {
-	e := EggWidget{
+	return &EggWidget{
 		boilTicker:  boilTimer,
 		startButton: &widget.Clickable{},
 		boilDurationInput: widget.Editor{
 			Alignment:  text.Middle,
 			SingleLine: true,
 		},
-		theme:   material.NewTheme(gofont.Collection()),
-		updates: make(chan struct{}),
-		m:       &sync.Mutex{},
+		theme: material.NewTheme(gofont.Collection()),
 	}
-
-	go func() {
-		for progressNew := range e.boilTicker.ProgressCh() {
-			e.m.Lock()
-			e.progress = progressNew
-			e.m.Unlock()
-			e.updates <- struct{}{}
-		}
-	}()
-
-	return &e
 }
 
 type EggWidget struct {
 	boilTicker        *BoilTimer
+	boilTimerState    BoilTimerState
 	startButton       *widget.Clickable
-	boilDuration      time.Duration
 	boilDurationInput widget.Editor
 	boilPrecision     int
 	theme             *material.Theme
-	updates           chan struct{}
-	progress          float64
-	m                 *sync.Mutex
 }
 
-func (e *EggWidget) Tick() <-chan struct{} { return e.updates }
 func (e *EggWidget) Close() {
-	close(e.updates)
 	e.boilTicker.Close()
 }
 
+// Widget for inputing the boil duration.
+const boilDurationPrecision int = 1
+
 func (e *EggWidget) Layout(gtx layout.Context) D {
+	//////////////////////////////////////////////////////////////////////////////
+	//                                  State                                   //
+	//////////////////////////////////////////////////////////////////////////////
+
+	// Handle start button clicks here.
+	if e.startButton.Clicked() {
+		// Read from the input box
+		inputString := e.boilDurationInput.Text()
+		inputString = strings.TrimSpace(inputString)
+		inputFloat, _ := strconv.ParseFloat(inputString, 32)
+
+		// Check if the output of the ticker has changed significantly
+		boilRemain := float64(e.boilTicker.BoilRemain(e.boilTimerState)) / float64(time.Second)
+		if math.Abs(boilRemain-inputFloat) > math.Pow10(-boilDurationPrecision) {
+			e.boilTimerState.duration = time.Duration(inputFloat * float64(time.Second))
+			e.boilTimerState = e.boilTicker.Do(BoilTimerSignalReset, e.boilTimerState)
+		} else {
+			// Handle ticker.
+			signal := BoilTimerSignalStart
+			if e.boilTimerState.boiling {
+				signal = BoilTimerSignalStop
+			}
+			if e.boilTimerState.duration > 0 {
+				e.boilTimerState = e.boilTicker.Do(signal, e.boilTimerState)
+			}
+		}
+	}
+
+	//////////////////////////////////////////////////////////////////////////////
+	//                                  Layout                                  //
+	//////////////////////////////////////////////////////////////////////////////
+
 	// Only used for when predrawing the ui.
 	var preDraw bool = false
 
-	e.m.Lock()
-	progress := e.progress
-	e.m.Unlock()
-
-	// Widget for inputing the boil duration.
-	const boilDurationPrecision int = 1
+	// Alias boiler state progress.
+	progress := e.boilTimerState.progress
 
 	// Define flex layout with the following options.
 	flex := layout.Flex{
@@ -164,12 +177,11 @@ func (e *EggWidget) Layout(gtx layout.Context) D {
 			func(gtx layout.Context) D {
 				// Default state is to start boil else try to stop the boiling.
 				btnState := "Start"
-				if e.boilTicker.Boiling() {
+				if e.boilTimerState.boiling {
 					btnState = "Stop"
 				}
-				if progress >= 1 {
+				if (progress >= 1) && (e.boilTimerState.duration != 0) {
 					btnState = "Finished"
-					e.boilTicker.Stop(nil)
 				}
 
 				// Style the button according to the theme to get a styled button back.
@@ -203,8 +215,8 @@ func (e *EggWidget) Layout(gtx layout.Context) D {
 			ed = material.Editor(e.theme, &e.boilDurationInput, "sec")
 
 			// If boiling out how far along in the boiling process we are.
-			if e.boilTicker.Boiling() && progress < 1 {
-				boilRemain := float64(e.boilTicker.BoilRemain(progress)) / float64(time.Second)
+			if e.boilTimerState.boiling && progress < 1 {
+				boilRemain := float64(e.boilTicker.BoilRemain(e.boilTimerState)) / float64(time.Second)
 				// Format to 1 decimal.
 				precisionStr := fmt.Sprintf("%%.%df", boilDurationPrecision)
 				boilRemainStr := fmt.Sprintf(precisionStr, boilRemain)
@@ -296,28 +308,6 @@ func (e *EggWidget) Layout(gtx layout.Context) D {
 		}
 	}
 
-	// Handle start button clicks here.
-	if e.startButton.Clicked() {
-		// Read from the input box
-		inputString := e.boilDurationInput.Text()
-		inputString = strings.TrimSpace(inputString)
-		inputFloat, _ := strconv.ParseFloat(inputString, 32)
-
-		// Check if the output of the ticker has changed significantly
-		boilRemain := float64(e.boilTicker.BoilRemain(progress))
-		if math.Abs(boilRemain-inputFloat) > math.Pow10(-boilDurationPrecision) {
-			e.boilDuration = time.Duration(inputFloat * float64(time.Second))
-			e.boilTicker.Reset(&e.boilDuration)
-		}
-
-		// Handle ticker.
-		if !e.boilTicker.Boiling() {
-			e.boilTicker.Start(nil)
-		} else {
-			e.boilTicker.Stop(nil)
-		}
-	}
-
 	// Reverse rendering order to figure out the size of the egg widget.
 	var eggWidget layout.Widget
 	{
@@ -353,16 +343,26 @@ func (e *EggWidget) Layout(gtx layout.Context) D {
 	)
 }
 
+type BoilTimerState struct {
+	boiling  bool
+	duration time.Duration
+	progress float64
+}
+
 func NewBoilTimer(freq, duration time.Duration) *BoilTimer {
 	bt := BoilTimer{
-		freq:       freq,
-		duration:   duration,
-		ticker:     time.NewTicker(freq),
-		boiling:    false,
-		progress:   0.0,
-		progressCh: make(chan float64),
-		closer:     make(chan struct{}),
+		freq:   freq,
+		ticker: time.NewTicker(freq),
+		state: BoilTimerState{
+			boiling:  false,
+			duration: duration,
+			progress: 0.0,
+		},
+		c:      make(chan BoilTimerState),
+		action: make(chan BoilTimerStateSignal),
+		closer: make(chan struct{}),
 	}
+	bt.ticker.Stop()
 
 	go func() {
 		var done bool
@@ -370,68 +370,95 @@ func NewBoilTimer(freq, duration time.Duration) *BoilTimer {
 			select {
 			case <-bt.ticker.C:
 				// Increment progress by the total boil time divided by the tick duration.
-				if bt.progress < 1 {
-					bt.progress += (float64(bt.freq) / float64(bt.duration))
-					if bt.duration == 0 {
-						bt.progressCh <- 0
-						continue
+				if bt.state.progress < 1 {
+					bt.state.progress += (float64(bt.freq) / float64(bt.state.duration))
+					if bt.state.duration == 0 {
+						bt.state.progress = 0
 					}
-					bt.progressCh <- bt.progress
+					bt.c <- bt.state
 				}
+			case action := <-bt.action:
+				signal := action.Signal
+
+				// Set the duration.
+				bt.state = *action.State
+
+				// Boiling false if stopping else true
+				bt.state.boiling = (signal == BoilTimerSignalStart) || (signal == BoilTimerSignalRestart)
+
+				// Stop the timer if boiling.
+				if bt.state.boiling {
+					bt.ticker.Reset(bt.freq)
+				} else {
+					bt.ticker.Stop()
+				}
+
+				// If restarting or resetting then progress goes to zero.
+				if (signal == BoilTimerSignalReset) || (signal == BoilTimerSignalRestart) {
+					bt.state.progress = 0.0
+				}
+
+				bt.c <- bt.state
+
 			case <-bt.closer:
 				done = true
 			}
 		}
-		close(bt.progressCh)
+		close(bt.c)
+		close(bt.action)
 	}()
 
 	return &bt
 }
 
 type BoilTimer struct {
-	freq       time.Duration
-	duration   time.Duration
-	boiling    bool
-	ticker     *time.Ticker
-	progress   float64
-	progressCh chan float64
-	closer     chan struct{}
+	freq   time.Duration
+	ticker *time.Ticker
+	state  BoilTimerState
+	action chan BoilTimerStateSignal
+	c      chan BoilTimerState
+	closer chan struct{}
 }
 
-func (bt *BoilTimer) setDuration(duration *time.Duration) {
-	if duration != nil {
-		bt.duration = *duration
+func (bt *BoilTimer) BoilRemain(state BoilTimerState) time.Duration {
+	return time.Duration((1 - state.progress) * float64(state.duration))
+}
+
+func (bt *BoilTimer) Do(signal BoilTimerSignal, state BoilTimerState) BoilTimerState {
+	go func() { bt.action <- BoilTimerStateSignal{signal, &state} }()
+	return <-bt.c
+}
+
+func (bt *BoilTimer) C() <-chan BoilTimerState { return bt.c }
+func (bt *BoilTimer) Close()                   { bt.closer <- struct{}{} }
+
+type BoilTimerStateSignal struct {
+	Signal BoilTimerSignal
+	State  *BoilTimerState
+}
+
+type BoilTimerSignal int
+
+func (b BoilTimerSignal) String() string {
+	switch b {
+	case BoilTimerSignalGet:
+		return "Get"
+	case BoilTimerSignalStop:
+		return "Stop"
+	case BoilTimerSignalStart:
+		return "Start"
+	case BoilTimerSignalReset:
+		return "Reset"
+	case BoilTimerSignalRestart:
+		return "Restart"
 	}
+	panic("unreachable")
 }
 
-func (bt *BoilTimer) Start(duration *time.Duration) {
-	bt.ticker.Stop()
-	bt.setDuration(duration)
-	bt.boiling = true
-	bt.ticker.Reset(bt.freq)
-}
-
-func (bt *BoilTimer) Stop(duration *time.Duration) {
-	bt.ticker.Stop()
-	bt.setDuration(duration)
-	bt.boiling = false
-}
-
-func (bt *BoilTimer) Reset(duration *time.Duration) {
-	bt.progress = 0
-	go func() { bt.progressCh <- 0 }()
-	bt.Stop(duration)
-}
-
-func (bt *BoilTimer) Restart(duration *time.Duration) {
-	bt.progress = 0
-	go func() { bt.progressCh <- 0 }()
-	bt.Start(duration)
-}
-
-func (bt *BoilTimer) Boiling() bool              { return bt.boiling }
-func (bt *BoilTimer) ProgressCh() <-chan float64 { return bt.progressCh }
-func (bt *BoilTimer) Close()                     { bt.closer <- struct{}{} }
-func (bt *BoilTimer) BoilRemain(progress float64) time.Duration {
-	return time.Duration((1 - progress) * float64(bt.duration))
-}
+const (
+	BoilTimerSignalGet BoilTimerSignal = iota
+	BoilTimerSignalStop
+	BoilTimerSignalStart
+	BoilTimerSignalReset
+	BoilTimerSignalRestart
+)
