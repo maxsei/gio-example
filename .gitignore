@@ -1,2 +1,4 @@
 web/main.wasm
 main
+bin/*
+!bin/.gitkeep
