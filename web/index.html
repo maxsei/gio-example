@@ -11,7 +11,10 @@ license that can be found in the LICENSE file.
   </head>
 
   <body>
-    <script src="http://cdn.jsdelivr.net/gh/golang/go/misc/wasm/wasm_exec.js"></script>
+
+    <!-- Make sure to put your go version in the cdn script src. -->
+    <!-- <script src="http://cdn.jsdelivr.net/gh/golang/go@$( go version )/misc/wasm/wasm_exec.js"></script> -->
+    <script src="http://cdn.jsdelivr.net/gh/golang/go@go1.16.3/misc/wasm/wasm_exec.js"></script>
 
     <script>
       if (!WebAssembly.instantiateStreaming) {

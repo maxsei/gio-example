@@ -2,10 +2,12 @@ BINARY_NAME=main
 GOOS=$$(go env GOOS )
 GOARCH=$$(go env GOARCH )
 
+BINARY_PATH=./bin/${GOOS}-${GOARCH}-${BINARY_NAME}
+
 all: build windows wasm test
 
 build:
-	go build -o ./bin/${GOOS}-${GOARCH}-${BINARY_NAME}
+	go build -o ${BINARY_PATH}
 
 windows:
 	GOOS=windows GOARCH=amd64	go build -ldflags="-H windowsgui" -o ./bin/windows-amd64-${BINARY_NAME}.exe
@@ -17,8 +19,8 @@ test:
 	go test -v *.go
 
 run:
-	go build -o ./bin/${GOOS}-${GOARCH}-${BINARY_NAME} *.go
-	./bin/${BINARY_NAME}
+	go build -o ${BINARY_PATH} *.go
+	${BINARY_PATH}
 
 clean:
 	go clean
