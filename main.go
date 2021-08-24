@@ -195,21 +195,16 @@ func (e *EggWidget) Layout(gtx layout.Context) D {
 
 	// Boil duration input widget.
 	boilDurationInputWidget := func(gtx layout.Context) D {
-		hzMarginPct := float32(0.90)
-		hzMargin := float32(gtx.Constraints.Max.X) * hzMarginPct
-
-		// Minimum text input width.
-		minTextInputWidth := 40
-		hzMarginMin := float32(gtx.Constraints.Max.X - minTextInputWidth)
-		if hzMargin > hzMarginMin {
-			hzMargin = hzMarginMin
-		}
+		// Calculate the margins for a centered button with size of 50.
+		minBtnSize := unit.Dp(50)
+		marginHz := unit.Add(gtx.Metric,
+			minBtnSize.Scale(-1), unit.Px(float32(gtx.Constraints.Max.X))).Scale(0.5)
 
 		margins := layout.Inset{
 			Top:    unit.Dp(20),
 			Bottom: unit.Dp(20),
-			Right:  unit.Dp(hzMargin / 2),
-			Left:   unit.Dp(hzMargin / 2),
+			Right:  marginHz,
+			Left:   marginHz,
 		}
 		border := widget.Border{
 			Color:        color.NRGBA{R: 0, G: 200, B: 125, A: 200},
